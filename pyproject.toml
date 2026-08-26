@@ -1,0 +1,24 @@
+[project]
+name = "project-control-web"
+version = "0.1.0"
+description = "A Project Control Supabase-alapú webes változata"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "jinja2",
+    "openpyxl",
+    "python-multipart",
+    "python-dotenv",
+    "python-docx",
+    "reportlab",
+    "uvicorn",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["szerver"]
+testpaths = ["szerver/tesztek"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

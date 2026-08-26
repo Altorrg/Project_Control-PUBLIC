@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: project-control
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn alkalmazas.webszerver:app --app-dir szerver --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: AI_PROVIDER
+        value: generic
+      - key: AI_API_BASE_URL
+        value: http://92.5.17.196:8000/api/kerdes
+      - key: AI_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: qcwind/qwen2.5-7B-instruct-Q4_K_M:latest
+      - key: AI_REQUEST_TIMEOUT_SECONDS
+        value: "300"

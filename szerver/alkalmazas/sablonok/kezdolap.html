@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="hu">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ app_name }}</title>
+    <link rel="stylesheet" href="/static/megjelenes.css?v=20260807-5">
+    <script src="/static/alkalmazas.js?v=20260810-1" defer></script>
+</head>
+<body>
+    <section id="login-view" class="login-view" hidden>
+        <div class="login-u-mark" aria-hidden="true">U</div>
+        <form id="login-form" class="login-panel" autocomplete="on">
+            <div class="brand-mark" aria-hidden="true">PC</div>
+            <p class="eyebrow">Project Control</p>
+            <h1>Bejelentkezés</h1>
+            <label for="login-email">E-mail</label>
+            <input id="login-email" name="email" type="email" autocomplete="username">
+            <label for="login-password">Jelszó</label>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" minlength="6">
+            <p id="login-error" class="form-error" role="alert"></p>
+            <button type="submit" class="primary-button">Admin Belépés</button>
+            <div class="login-divider"><span>vagy</span></div>
+            <button id="guest-login-btn" type="button" class="secondary-button guest-login-btn">Belépés vendégként (1 kattintás)</button>
+            <p class="login-hint">Demó mód: a vendég belépéssel közvetlenül kipróbálhatod a funkciókat regisztráció nélkül.</p>
+        </form>
+    </section>
+
+    <div id="app-view" class="app-shell" hidden>
+        <aside class="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-mark" aria-hidden="true">PC</div>
+                <div><strong>Project Control</strong><span>projektirányítás</span></div>
+            </div>
+            <button id="back-projects" class="project-context" type="button">
+                <span id="active-project-name">Projektek</span>
+                <small id="active-project-meta">Válassz munkaterületet</small>
+            </button>
+            <nav id="module-nav" aria-label="Modulok">
+                <button type="button" data-module="settings"><span aria-hidden="true">⚙</span> Adatok</button>
+                <button type="button" data-module="disciplines"><span aria-hidden="true">◆</span> Szakágak</button>
+                <button type="button" data-module="schedule"><span aria-hidden="true">▤</span> Ütemterv</button>
+                <button type="button" data-module="subcontractors"><span aria-hidden="true">⇄</span> Alvállalkozók</button>
+                <button type="button" data-module="finance"><span aria-hidden="true">Ft</span> Pénzügy</button>
+                <button type="button" data-module="engagements"><span aria-hidden="true">✓</span> Engedélyek</button>
+                <button type="button" data-module="admin" id="admin-nav"><span aria-hidden="true">⚙</span> Admin</button>
+            </nav>
+            <div class="sidebar-footer">
+                <span id="user-name"></span>
+                <small id="user-role"></small>
+                <button id="logout-button" type="button">Kijelentkezés</button>
+            </div>
+        </aside>
+
+        <main class="workspace">
+            <header class="topbar">
+                <div>
+                    <p id="page-eyebrow" class="eyebrow">Projektportfólió</p>
+                    <h1 id="page-title">Projektek</h1>
+                </div>
+                <div class="topbar-actions">
+                    <time id="current-application-date" class="current-application-date" datetime="" title="Az alkalmazás aktuális dátuma">Ma: –</time>
+                    <label class="global-search"><span aria-hidden="true">⌕</span><input id="global-search" type="search" placeholder="Keresés"></label>
+                    <button id="account-button" class="secondary-button" type="button">Fiók</button>
+                    <button id="today-tasks-button" class="icon-button" type="button" title="Mai teendők" aria-label="Mai teendők">✓<span id="today-tasks-count">0</span></button>
+                    <button id="notification-button" class="icon-button" type="button" title="Értesítések" aria-label="Értesítések">♢<span id="notification-count">0</span></button>
+                </div>
+            </header>
+            <section id="content" class="content" aria-live="polite"></section>
+        </main>
+
+        <button id="ai-assistant-toggle" class="ai-assistant-fab" type="button" aria-label="AI asszisztens megnyitása" aria-controls="ai-assistant-panel" aria-expanded="false">
+            <span aria-hidden="true">AI</span><span class="ai-assistant-fab-label">Asszisztens</span>
+        </button>
+        <div id="ai-assistant-backdrop" class="ai-assistant-backdrop" aria-hidden="true"></div>
+        <aside id="ai-assistant-panel" class="ai-assistant-panel" aria-label="AI Asszisztens" aria-hidden="true">
+            <header class="ai-assistant-header">
+                <div><p class="eyebrow">Project Control</p><h2>AI Asszisztens</h2></div>
+                <button id="ai-assistant-close" class="icon-button" type="button" aria-label="AI asszisztens bezárása">×</button>
+            </header>
+            <div id="ai-assistant-messages" class="ai-assistant-messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+            <form id="ai-assistant-form" class="ai-assistant-form" autocomplete="off">
+                <label class="sr-only" for="ai-assistant-input">Üzenet az AI asszisztensnek</label>
+                <textarea id="ai-assistant-input" rows="3" maxlength="4000" placeholder="Írd ide a kérdésedet…"></textarea>
+                <div class="ai-assistant-actions"><span id="ai-assistant-status" class="ai-assistant-status" role="status"></span><button id="ai-assistant-send" class="primary-button" type="submit">Küldés</button></div>
+            </form>
+        </aside>
+    </div>
+
+    <dialog id="modal" class="modal">
+        <header><div><p id="modal-eyebrow" class="eyebrow"></p><h2 id="modal-title"></h2></div><button id="modal-close" class="icon-button" type="button" aria-label="Bezárás">×</button></header>
+        <div id="modal-content" class="modal-content"></div>
+    </dialog>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+</body>
+</html>

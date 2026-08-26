@@ -1,0 +1,9 @@
+fastapi
+httpx
+jinja2
+openpyxl
+python-multipart
+python-dotenv
+python-docx
+reportlab
+uvicorn
