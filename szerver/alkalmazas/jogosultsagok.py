@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from .hitelesites import AccessToken, AuthenticatedUser, CurrentUser, get_gateway
+from .hitelesites import AccessToken, AuthenticatedUser, CurrentUser, GUEST_TOKEN, get_gateway
 from .hibak import AuthorizationError
 from .supabase_kapcsolat import SupabaseGateway
 
@@ -71,6 +71,23 @@ async def ensure_project_access(
     *,
     write: bool = False,
 ) -> None:
+    if token == GUEST_TOKEN:
+        # The public demo grants anonymous table access through its existing RLS
+        # policies. Its authenticated-only RPC must not be used as a guest gate.
+        # A normal database without anonymous project access still returns no
+        # rows (or denies the request); no service-role credential is involved.
+        project = await gateway.select(
+            "projects",
+            token,
+            select="id",
+            filters={"id": f"eq.{project_id}", "is_deleted": "eq.false"},
+            limit=1,
+        )
+        if not project.data:
+            raise AuthorizationError("A demóprojekt nem érhető el vendégként.")
+        # Write endpoints also check their operation permission, and Supabase
+        # continues to enforce RLS on the subsequent actual write.
+        return
     result = await gateway.rpc(
         "can_access_project",
         token,
