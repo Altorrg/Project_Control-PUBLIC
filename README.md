@@ -110,7 +110,7 @@ Az indító script automatikusan ellenőrzi a környezetet és megnyitja az alka
 
 ## Tesztek futtatása
 
-A teljes tesztcsomag (140 automatizált egység- és integrációs teszt) futtatása:
+A 2026. október 30-án ellenőrzött tesztcsomag (145 teszt és 10 részellenőrzés) futtatása:
 
 ```bash
 pytest szerver/tesztek -o pythonpath=szerver
@@ -132,7 +132,7 @@ pytest szerver/tesztek -o pythonpath=szerver
 │   │   ├── statikus/                  # alkalmazas.js, megjelenes.css
 │   │   ├── szolgaltatasok/            # PDF, DOCX, XLSX export és AI motor
 │   │   └── vegpontok/                 # FastAPI REST API útvonalak
-│   └── tesztek/                       # Pytest tesztcsomag (140 teszt)
+│   └── tesztek/                       # Pytest tesztcsomag
 ├── eszkozok/                          # Telepítő- és segédszkriptek
 ├── inditas.py                         # Helyi alkalmazásindító
 ├── pyproject.toml                     # Python projektkonfiguráció
