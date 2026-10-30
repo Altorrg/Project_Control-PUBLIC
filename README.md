@@ -2,6 +2,16 @@
 
 Modern, mérnöki és vállalati projektirányítási, Gantt ütemtervezési, alvállalkozói szerződéskezelési és engedélyezési webalkalmazás.
 
+## Online kipróbálás
+
+**[Project Control – nyilvános demó megnyitása](https://project-control-public.onrender.com/)**
+
+A belépőoldalon válaszd a **„Belépés vendégként (1 kattintás)”** gombot. Regisztráció nélkül megtekinthetők és kipróbálhatók a mintaadatokra épülő funkciók.
+
+Ez egy közös, szerkeszthető bemutatókörnyezet, nem vállalati éles rendszer. Kizárólag kitalált mintaadatokat használj benne; valós ügyféladatot, személyes adatot vagy üzleti dokumentumot ne tölts fel. Az ingyenes hosztolás inaktivitás után elalszik, ezért az első betöltés egy percig vagy tovább is tarthat; az adatbázis időnként külön újraindítást igényelhet. Az opcionális AI-szolgáltatás elérhetősége külön beállítástól függ.
+
+AI támogatásával fejlesztett projekt Sebestény Máté infrastruktúra-tervezési és projektkoordinációs tapasztalatára építve. További referenciák: [CadAgent MCP bemutató](https://github.com/Altorrg/cadagent-mcp-showcase) · [Smart Redactor](https://github.com/Altorrg/smart_redactor).
+
 Ez a repozitórium egy **teljes értékű, nyílt forrású minta és bemutató verzió**, amely azonnal kipróbálható helyileg vagy tetszőleges felhőszolgáltatón (pl. Render, Railway, Fly.io) a csatolt tiszta Supabase adatbázis-telepítővel.
 
 ---
@@ -100,7 +110,7 @@ Az indító script automatikusan ellenőrzi a környezetet és megnyitja az alka
 
 ## Tesztek futtatása
 
-A teljes tesztcsomag (140 automatizált egység- és integrációs teszt) futtatása:
+A 2026. október 30-án ellenőrzött tesztcsomag (145 teszt és 10 részellenőrzés) futtatása:
 
 ```bash
 pytest szerver/tesztek -o pythonpath=szerver
@@ -122,7 +132,7 @@ pytest szerver/tesztek -o pythonpath=szerver
 │   │   ├── statikus/                  # alkalmazas.js, megjelenes.css
 │   │   ├── szolgaltatasok/            # PDF, DOCX, XLSX export és AI motor
 │   │   └── vegpontok/                 # FastAPI REST API útvonalak
-│   └── tesztek/                       # Pytest tesztcsomag (140 teszt)
+│   └── tesztek/                       # Pytest tesztcsomag
 ├── eszkozok/                          # Telepítő- és segédszkriptek
 ├── inditas.py                         # Helyi alkalmazásindító
 ├── pyproject.toml                     # Python projektkonfiguráció
