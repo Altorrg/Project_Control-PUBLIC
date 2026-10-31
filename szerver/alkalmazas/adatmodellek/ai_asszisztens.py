@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
-from .kozos import ApiModel, LongText, ShortText
+from .kozos import ApiModel, ShortText
 
 
 AIMessageText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
@@ -29,7 +29,7 @@ class AIAssistantSource(ApiModel):
 
 
 class AIAssistantResponse(ApiModel):
-    answer: LongText
+    answer: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)]
     sources: list[AIAssistantSource] = Field(default_factory=list, max_length=20)
     request_id: ShortText
     suggestions: list[ShortText] = Field(default_factory=list, max_length=10)

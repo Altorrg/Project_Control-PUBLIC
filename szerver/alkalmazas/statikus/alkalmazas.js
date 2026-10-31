@@ -382,7 +382,7 @@ function buildAIAssistantHistory() {
         .filter((item) => item.role === "user" || item.role === "assistant")
         .slice(0, -1)
         .slice(-20)
-        .map((item) => ({ role: item.role, content: item.text }));
+        .map((item) => ({ role: item.role, content: item.text.slice(0, 4000) }));
 }
 
 function renderAIAssistantMessages() {
@@ -391,7 +391,7 @@ function renderAIAssistantMessages() {
     container.innerHTML = "";
     const messages = state.aiAssistant.messages.length
         ? state.aiAssistant.messages
-        : [{ role: "system", text: "Kérdezz a Project Control használatáról. Az asszisztens a bejelentkezett fiókod jogosultságai alapján válaszol." }];
+        : [{ role: "system", text: "A Project Control dokumentációjában segítek eligazodni. Egy rövid, konkrét kérdést írj; például: Hogyan készítsek ajánlatkérést? Élő projektadatokat nem olvasok és módosításokat nem hajtok végre." }];
     messages.forEach((message) => {
         const item = document.createElement("article");
         item.className = `ai-message ${message.role}`;
@@ -400,6 +400,11 @@ function renderAIAssistantMessages() {
         const text = document.createElement("p");
         text.textContent = message.text;
         item.append(label, text);
+        if (message.sources?.length) {
+            const sources = document.createElement("small");
+            sources.textContent = `Dokumentáció: ${message.sources.map((source) => source.label).join("; ")}`;
+            item.append(sources);
+        }
         container.append(item);
     });
     if (state.aiAssistant.sending) {
@@ -441,7 +446,7 @@ async function sendAIAssistantMessage() {
     state.aiAssistant.lastMessage = message;
     input.value = "";
     sendButton.disabled = true;
-    status.textContent = "Küldés…";
+    status.textContent = "A kis Oracle-modell válaszára várunk…";
     state.aiAssistant.messages.push({ role: "user", text: message });
     renderAIAssistantMessages();
     try {
@@ -454,13 +459,14 @@ async function sendAIAssistantMessage() {
                 history: buildAIAssistantHistory(),
             },
         });
-        state.aiAssistant.messages.push({ role: "assistant", text: aiAssistantResponseText(payload) });
+        state.aiAssistant.messages.push({ role: "assistant", text: aiAssistantResponseText(payload), sources: payload.sources || [] });
     } catch (error) {
         console.error("AI asszisztens hívási hiba", error);
         state.aiAssistant.messages.push({
             role: "error",
             text: error?.message || "Az AI asszisztens most nem érhető el. Próbáld meg később.",
         });
+        if (!input.value) input.value = message;
     } finally {
         state.aiAssistant.sending = false;
         state.aiAssistant.lastMessage = "";

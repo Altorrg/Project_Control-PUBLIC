@@ -136,10 +136,14 @@ def _request_parts(
         )
 
     if provider in GENERIC_PROVIDERS:
+        # The Oracle RAG endpoint embeds `kerdes` for document retrieval.
+        # System instructions and the whole conversation dilute that search;
+        # its own server already supplies the system prompt and documentation.
+        question = payload.message if settings.ai_api_base_url.rstrip("/").endswith("/api/kerdes") else _build_question(payload)
         return (
             settings.ai_api_base_url,
             {**common_headers, "x-api-key": settings.ai_api_key},
-            {"kerdes": _build_question(payload), "model": settings.ai_model},
+            {"kerdes": question, "model": settings.ai_model},
         )
 
     raise ServiceUnavailableError(
@@ -210,6 +214,28 @@ def _provider_error_message(status_code: int) -> str:
     return "Az AI-asszisztens szolgáltatás jelenleg nem érhető el."
 
 
+def _extract_sources(data: Any) -> list[AIAssistantSource]:
+    if not isinstance(data, dict):
+        return []
+    items = data.get("forrasok", data.get("sources", []))
+    if not isinstance(items, list):
+        return []
+    sources = []
+    seen = set()
+    for item in items:
+        label = item if isinstance(item, str) else item.get("label") if isinstance(item, dict) else None
+        if not isinstance(label, str) or not label.strip():
+            continue
+        label = label.strip()[:255]
+        if label in seen:
+            continue
+        seen.add(label)
+        sources.append(AIAssistantSource(label=label))
+        if len(sources) == 20:
+            break
+    return sources
+
+
 async def generate_ai_assistant_response(
     settings: Settings,
     payload: AIAssistantRequest,
@@ -219,12 +245,22 @@ async def generate_ai_assistant_response(
     url, headers, body = _request_parts(settings, payload)
     owns_client = client is None
     http_client = client or httpx.AsyncClient(
-        timeout=settings.ai_request_timeout_seconds,
+        timeout=httpx.Timeout(settings.ai_request_timeout_seconds, connect=10.0, pool=10.0),
         follow_redirects=False,
     )
     try:
         response = await http_client.post(url, headers=headers, json=body)
-    except (httpx.RequestError, httpx.TimeoutException) as exc:
+    except httpx.ConnectError as exc:
+        logger.warning("AI szolgáltató kapcsolódási hiba: %s", exc.__class__.__name__)
+        raise ServiceUnavailableError(
+            "Az AI-szerverhez most nem lehet kapcsolódni. A kérdésedet nem sikerült feldolgozni; próbáld újra később."
+        ) from exc
+    except httpx.TimeoutException as exc:
+        logger.warning("AI szolgáltató időtúllépés: %s", exc.__class__.__name__)
+        raise ServiceUnavailableError(
+            "Az AI-szerver nem válaszolt időben. Próbáld újra később egy rövid, konkrét kérdéssel."
+        ) from exc
+    except httpx.RequestError as exc:
         logger.warning("AI szolgáltató hálózati hiba: %s", exc.__class__.__name__)
         raise ServiceUnavailableError(
             "Az AI-asszisztens szolgáltatás jelenleg nem érhető el."
@@ -245,7 +281,7 @@ async def generate_ai_assistant_response(
         data = response.json()
     except ValueError:
         text = response.text.strip()
-        if text:
+        if text and not text.lstrip().casefold().startswith(("<!doctype html", "<html")):
             return AIProviderResult(answer=text)
         logger.warning("AI szolgáltató nem JSON választ adott")
         raise ServiceUnavailableError("Az AI-asszisztens válasza nem értelmezhető.")
@@ -254,4 +290,4 @@ async def generate_ai_assistant_response(
     if not answer:
         logger.warning("AI szolgáltató válaszában nincs szöveg provider=%s", settings.ai_provider)
         raise ServiceUnavailableError("Az AI-asszisztens válasza nem értelmezhető.")
-    return AIProviderResult(answer=answer)
+    return AIProviderResult(answer=answer, sources=_extract_sources(data))
