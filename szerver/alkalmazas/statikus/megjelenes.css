@@ -736,3 +736,46 @@ tbody tr.selected { background: #dceefe; box-shadow: inset 3px 0 var(--blue); }
 @media (prefers-reduced-motion: reduce) {
     #notification-button.has-pending { animation: none; background: #fff0ef; box-shadow: 0 0 0 3px rgba(200, 76, 68, .16); }
 }
+
+/* Public demo polish, 2026-10-31. */
+.project-row { cursor:pointer; }
+.sr-only { position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+.section-heading:has(> div > .sr-only) { min-height:0; padding-top:10px; padding-bottom:10px; }
+.workspace-tabs { flex-wrap:wrap; overflow-x:visible; gap:5px; padding:8px 0; background:transparent; }
+.workspace-tabs button { min-height:40px; border:1px solid #cbd5dc; border-radius:6px; background:#f5f7f9; padding:8px 12px; }
+.workspace-tabs button.active { background:#eaf3fa; color:#195f96; border-color:#80b2d6; box-shadow:inset 0 -3px #2878bd; }
+.settings-tabs button.active b { background:#d2e6f5; color:#195f96; }
+.project-data-section > h3 { background:#edf3f7; color:#26485d; border-left:3px solid #8aafc4; padding:9px 12px; font-size:12px; letter-spacing:.035em; }
+.project-row { grid-template-columns:100px minmax(190px,2.5fr) minmax(120px,1fr) 80px 110px; }
+.project-row > span:nth-child(2), .project-row > span:nth-child(3) { white-space:normal; overflow-wrap:anywhere; }
+.project-row > span:nth-child(2) { font-weight:650; }
+.project-row > span:nth-child(2) small { white-space:normal; }
+.project-open-arrow { display:inline-flex; align-items:center; justify-content:center; min-height:40px; color:#195f96; background:#eaf3fa; border:1px solid #b5cee0; border-radius:5px; padding:6px 9px; font-size:12px; cursor:pointer; }
+.project-open-arrow:focus-visible { outline:3px solid #2878bd; outline-offset:2px; }
+.lobby-layout { grid-template-columns:minmax(0,1fr) 260px; }
+.subcontractor-workspace:not(.has-selection) { grid-template-columns:minmax(0,1fr); }
+.subcontractor-workspace:not(.has-selection) > .workflow-panel-resizer, .subcontractor-workspace:not(.has-selection) > .workflow-side-panel { display:none; }
+.subcontractor-offers table { min-width:860px; }
+.subcontractor-offers td:nth-child(2) { min-width:240px; white-space:normal; overflow-wrap:anywhere; }
+.workflow-open { white-space:nowrap; min-height:36px; }
+.ai-assistant-fab { width:56px; height:56px; min-width:56px; min-height:56px; border-radius:50%; padding:0; display:grid; place-items:center; touch-action:none; user-select:none; cursor:grab; box-shadow:0 5px 18px rgba(23,57,42,.24); }
+.ai-assistant-fab > span:first-child { border:0; width:auto; height:auto; font-size:17px; }
+.ai-assistant-fab-label { display:none; }
+.ai-assistant-fab.dragging { cursor:grabbing; transition:none; }
+@media(max-width:1100px) { .lobby-layout { grid-template-columns:minmax(0,1fr); } .lobby-quick { position:static; } .lobby-stats { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(max-width:760px) { .project-row { grid-template-columns:90px minmax(0,1fr); gap:10px; } .project-row > span:nth-child(3) { grid-column:2; } .project-open-arrow { grid-column:2; justify-self:start; } .lobby-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .workspace-tabs button { flex:1 1 140px; } .project-data-row { grid-template-columns:minmax(0,1fr); gap:6px; } .ai-assistant-fab { width:56px; height:56px; padding:0; } }
+@media(max-width:900px) {
+    .topbar { flex-wrap:wrap; gap:10px; }
+    .topbar-actions { flex:1 1 100%; width:100%; flex-wrap:wrap; }
+    .global-search { flex:1 1 160px; width:auto; min-width:100px; }
+    .current-application-date { flex:0 0 auto; white-space:nowrap; }
+    .sidebar-brand > div:last-child { display:none; }
+    .project-row > span { display:block; }
+    .project-row small { display:block; white-space:normal; }
+}
+@media(max-width:620px) {
+    .topbar-actions { display:grid; grid-template-columns:minmax(0,1fr) auto auto auto; }
+    .current-application-date { grid-column:1 / -1; justify-self:start; }
+    .global-search { min-width:0; width:100%; }
+    .topbar-actions > button { flex-shrink:0; }
+}

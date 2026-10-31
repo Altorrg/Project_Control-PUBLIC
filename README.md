@@ -116,6 +116,14 @@ A 2026. október 30-án ellenőrzött tesztcsomag (145 teszt és 10 részellenő
 pytest szerver/tesztek -o pythonpath=szerver
 ```
 
+A modulváltás és a mozgatható AI-gomb 15 felületi regressziós tesztje:
+
+```bash
+node --test szerver/tesztek/test_ui_polish.cjs
+```
+
+A 2026. október 31-i demófrissítés rövidebb, tördelődő füleket, olvashatóbb projektlistát és külön Megnyitás gombokat használ. Az AI-kör egérrel vagy érintéssel húzható, helyét megjegyzi; billentyűzettel az Alt + nyílbillentyűk mozgatják, az Alt + Home visszaállítja. A minta projekt 120 000 Ft-os napidíja kitalált bemutatóérték; a pénzügyi mérföldkövek a 185 000 000 Ft-os mintaszerződés teljes összegét lefedik.
+
 ---
 
 ## Projekt Struktúra
