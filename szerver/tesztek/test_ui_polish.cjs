@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const source = fs.readFileSync(path.join(__dirname, '../alkalmazas/statikus/alkalmazas.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../alkalmazas/statikus/alkalmazas.js'), 'utf8').replace(/\r\n/g, '\n');
 function declaration(name) {
   let start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, name);
