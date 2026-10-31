@@ -37,6 +37,9 @@ const state = {
     searchTimer: null,
     performanceScope: null,
     apiRequestSequence: 0,
+    navigationVersion: 0,
+    viewRenderVersion: 0,
+    assignmentRenderVersion: 0,
     aiAssistant: { open: false, sending: false, messages: [], lastMessage: "" },
 };
 
@@ -49,6 +52,87 @@ const moduleLabels = {
     settings: ["Adatok", "Adatlap és projektstruktúra"],
     admin: ["Admin központ", "Felhasználók és jóváhagyások"],
 };
+
+function beginViewRender(module) {
+    if (state.module !== module || (!state.project && module !== "admin")) return null;
+    return { version: ++state.viewRenderVersion, navigation: state.navigationVersion, module, projectId: state.project?.id ?? null };
+}
+
+function viewRenderIsCurrent(view) {
+    return Boolean(view && view.version === state.viewRenderVersion && view.navigation === state.navigationVersion
+        && view.module === state.module && view.projectId === (state.project?.id ?? null));
+}
+
+function clampAssistantPosition(position, viewport, size = 56) {
+    const margin = 12;
+    const maxX = Math.max(margin, viewport.width - size - margin);
+    const bottomInset = viewport.width <= 620 ? 70 : margin;
+    const maxY = Math.max(margin, viewport.height - size - bottomInset);
+    const valid = position && Number.isFinite(position.x) && Number.isFinite(position.y);
+    return { x: Math.min(maxX, Math.max(margin, valid ? position.x : maxX)),
+        y: Math.min(maxY, Math.max(margin, valid ? position.y : maxY)) };
+}
+
+function wireAIFloatingButton() {
+    const button = $("#ai-assistant-toggle");
+    if (!button) return;
+    const storageKey = "pc.ai-button-position.v1";
+    let position = null;
+    let gesture = null;
+    let suppressClick = false;
+    try { position = JSON.parse(localStorage.getItem(storageKey) || "null"); } catch (_) { /* Optional preference. */ }
+    const apply = (save = false) => {
+        position = clampAssistantPosition(position, { width: window.innerWidth, height: window.innerHeight });
+        button.style.left = `${position.x}px`;
+        button.style.top = `${position.y}px`;
+        button.style.right = "auto";
+        button.style.bottom = "auto";
+        if (save) { try { localStorage.setItem(storageKey, JSON.stringify(position)); } catch (_) { /* Storage may be unavailable. */ } }
+    };
+    apply();
+    button.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || !event.isPrimary) return;
+        gesture = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+            x: position.x, y: position.y, moved: false };
+        suppressClick = false;
+        button.setPointerCapture(event.pointerId);
+    });
+    button.addEventListener("pointermove", (event) => {
+        if (!gesture || event.pointerId !== gesture.pointerId) return;
+        const dx = event.clientX - gesture.startX, dy = event.clientY - gesture.startY;
+        if (!gesture.moved && Math.hypot(dx, dy) < 6) return;
+        gesture.moved = true;
+        event.preventDefault();
+        position = { x: gesture.x + dx, y: gesture.y + dy };
+        button.classList.add("dragging");
+        apply();
+    });
+    const finish = (event) => {
+        if (!gesture || event.pointerId !== gesture.pointerId) return;
+        suppressClick = gesture.moved;
+        gesture = null;
+        button.classList.remove("dragging");
+        if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+        apply(true);
+    };
+    button.addEventListener("pointerup", finish);
+    button.addEventListener("pointercancel", finish);
+    button.addEventListener("lostpointercapture", finish);
+    button.addEventListener("click", (event) => {
+        if (suppressClick && event.detail !== 0) { suppressClick = false; event.preventDefault(); return; }
+        suppressClick = false;
+        setAIAssistantOpen(!state.aiAssistant.open);
+    });
+    button.addEventListener("keydown", (event) => {
+        const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+        if (event.altKey && event.key === "Home") { event.preventDefault(); position = null; apply(true); return; }
+        if (!event.altKey || !direction) return;
+        event.preventDefault();
+        position = { x: position.x + direction[0] * 16, y: position.y + direction[1] * 16 };
+        apply(true);
+    });
+    window.addEventListener("resize", () => apply(true));
+}
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -387,7 +471,7 @@ async function sendAIAssistantMessage() {
 }
 
 function wireAIAssistant() {
-    $("#ai-assistant-toggle")?.addEventListener("click", () => setAIAssistantOpen(!state.aiAssistant.open));
+    wireAIFloatingButton();
     $("#ai-assistant-close")?.addEventListener("click", () => setAIAssistantOpen(false));
     $("#ai-assistant-backdrop")?.addEventListener("click", () => setAIAssistantOpen(false));
     $("#ai-assistant-form")?.addEventListener("submit", async (event) => { event.preventDefault(); await sendAIAssistantMessage(); });
@@ -402,6 +486,8 @@ function showLoginView(message = "") {
         window.clearInterval(state.notificationRefreshTimer);
         state.notificationRefreshTimer = null;
     }
+    state.navigationVersion += 1;
+    state.viewRenderVersion += 1;
     state.user = null;
     state.project = null;
     state.notifications = [];
@@ -454,6 +540,8 @@ async function bootstrap() {
 }
 
 async function loadProjects(search = "") {
+    const navigation = ++state.navigationVersion;
+    state.viewRenderVersion += 1;
     const performanceScope = beginPerformanceScope("lobby");
     state.project = null;
     state.selectedProjectId = null;
@@ -469,20 +557,21 @@ async function loadProjects(search = "") {
         const requests = [api(`/projects${toQuery({ search })}`)];
         if (hasPermission("admin_panel")) requests.push(api("/admin/application-clock").catch(() => null));
         const results = await Promise.all(requests);
+        if (navigation !== state.navigationVersion) return;
         state.projects = results[0];
         state.applicationDate = results[1]?.application_date || new Date().toISOString().slice(0, 10);
         const projectList = state.projects.length ? state.projects.map((p) => `
-                <button class="project-row" type="button" data-project-id="${p.id}" aria-pressed="false">
+                <article class="project-row" data-project-id="${p.id}" tabindex="0" aria-label="${escapeHtml(p.name)}">
                     <strong><small>Munkaszám</small>${escapeHtml(p.work_number || "–")}</strong>
                     <span><small>Projekt neve</small>${escapeHtml(p.name)}<small>${escapeHtml(p.main_customer || p.customer || "Nincs megbízó")}</small></span>
                     <span><small>Vállalkozó</small>${escapeHtml(normalizeResponsibleCompany(p.responsible_company) || "–")}</span>
-                    <span>${escapeHtml(p.status || "Nincs állapot")}</span><span class="project-open-arrow" aria-hidden="true">→</span>
-                </button>`).join("") : `<div class="empty-state"><strong>Nincs elérhető projekt</strong><span>A felhasználói profilhoz még nincs projekt-hozzáférés rendelve.</span><button id="refresh-projects" class="secondary-button" type="button">Projektlista frissítése</button></div>`;
+                    <span>${escapeHtml(p.status || "Nincs állapot")}</span><button type="button" class="project-open-arrow" data-open-project="${p.id}" aria-label="${escapeHtml(p.name)} megnyitása">Megnyitás →</button>
+                </article>`).join("") : `<div class="empty-state"><strong>Nincs elérhető projekt</strong><span>A felhasználói profilhoz még nincs projekt-hozzáférés rendelve.</span><button id="refresh-projects" class="secondary-button" type="button">Projektlista frissítése</button></div>`;
         $("#content").innerHTML = `
             <div class="lobby-layout">
                 <section class="lobby-projects">
                     <div class="toolbar">
-                        <div><strong>${state.projects.length} elérhető projekt</strong><p class="muted">Egy kattintás kijelöl, dupla kattintás megnyit.</p></div>
+                        <div><strong>${state.projects.length} elérhető projekt</strong><p class="muted">Válassz egy projektet, majd nyisd meg a Megnyitás gombbal.</p></div>
                         <div class="toolbar-group">
                             <button id="new-project" class="primary-button" type="button" ${hasPermission("project_create") ? "" : 'disabled title="Nincs projektlétrehozási jogosultság"'}>Új projekt</button>
                             <button id="open-project" class="secondary-button" type="button" disabled>Megnyitás</button>
@@ -509,10 +598,20 @@ async function loadProjects(search = "") {
             </div>`;
         $$("[data-project-id]").forEach((row) => {
             row.addEventListener("click", () => selectProject(Number(row.dataset.projectId)));
+            row.addEventListener("keydown", (event) => {
+                if (event.target === row && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                    selectProject(Number(row.dataset.projectId));
+                }
+            });
             row.addEventListener("dblclick", () => {
                 selectProject(Number(row.dataset.projectId));
                 openSelectedProject();
             });
+        });
+        $$('[data-open-project]').forEach((control) => {
+            const open = (event) => { event.stopPropagation(); openProject(Number(control.dataset.openProject)); };
+            control.addEventListener("click", open);
         });
         $("#new-project")?.addEventListener("click", openProjectCreate);
         $("#open-project")?.addEventListener("click", openSelectedProject);
@@ -523,6 +622,7 @@ async function loadProjects(search = "") {
         $("#lobby-notifications")?.addEventListener("click", openNotifications);
         $("#refresh-projects")?.addEventListener("click", () => loadProjects($("#global-search").value.trim()));
     } catch (error) {
+        if (navigation !== state.navigationVersion) return;
         $("#content").innerHTML = empty(error.message);
     } finally {
         endPerformanceScope(performanceScope);
@@ -539,7 +639,7 @@ function updateProjectSelectionControls() {
     $$("[data-project-id]").forEach((row) => {
         const isSelected = Boolean(project) && Number(row.dataset.projectId) === project.id;
         row.classList.toggle("selected", isSelected);
-        row.setAttribute("aria-pressed", String(isSelected));
+        row.setAttribute("aria-label", `${state.projects.find((item) => item.id === Number(row.dataset.projectId))?.name || "Projekt"}${isSelected ? " · kijelölve" : ""}`);
     });
     ["#open-project", "#edit-project", "#rename-project", "#archive-project"].forEach((selector) => {
         const button = $(selector);
@@ -641,9 +741,13 @@ async function archiveSelectedProject() {
 }
 
 async function openProject(id) {
+    const navigation = ++state.navigationVersion;
+    state.viewRenderVersion += 1;
     loading("Projekt megnyitása…");
     try {
-        state.project = await api(`/projects/${id}`);
+        const project = await api(`/projects/${id}`);
+        if (navigation !== state.navigationVersion) return;
+        state.project = project;
         state.scheduleFinancialPhase = null;
         $("#active-project-name").textContent = state.project.name;
         $("#active-project-meta").textContent = `Projektazonosító: ${state.project.id}`;
@@ -652,6 +756,7 @@ async function openProject(id) {
         setProjectGate(true);
         await selectModule("settings");
     } catch (error) {
+        if (navigation !== state.navigationVersion) return;
         toast(error.message, true);
         await loadProjects();
     }
@@ -663,6 +768,8 @@ async function selectModule(module) {
     if (!state.project && module !== "admin") return loadProjects($("#global-search").value.trim());
     if (module === "admin" && !hasPermission("admin_panel")) return;
     if (!moduleLabels[module]) return;
+    const navigation = ++state.navigationVersion;
+    state.viewRenderVersion += 1;
     state.module = module;
     $$("#module-nav button").forEach((button) => button.classList.toggle("active", button.dataset.module === module));
     const [title, eyebrow] = moduleLabels[module];
@@ -673,6 +780,7 @@ async function selectModule(module) {
     try {
         await renderers[module]();
     } catch (error) {
+        if (navigation !== state.navigationVersion || state.module !== module) return;
         $("#content").innerHTML = empty(error.message);
         toast(error.message, true);
     } finally {
@@ -712,12 +820,16 @@ async function renderOverview() {
 }
 
 async function renderDisciplines() {
+    const view = beginViewRender("disciplines");
+    if (!view) return;
+    try {
     const [disciplines, rows, phases, rates] = await Promise.all([
         api(`/disciplines/${state.project.id}`),
         api(`/disciplines/${state.project.id}/daily-progress`),
         api(`/disciplines/${state.project.id}/phases`),
         api(`/disciplines/${state.project.id}/daily-rates`),
     ]);
+    if (!viewRenderIsCurrent(view)) return;
     if (!disciplines.length) {
         $("#content").innerHTML = empty("Ehhez a projekthez még nincs szakág beállítva.");
         return;
@@ -766,6 +878,9 @@ async function renderDisciplines() {
         toast("A kijelölt hónap törölve lett.");
         await renderDisciplines();
     });
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
+    }
 }
 
 function openProgressForm(disciplines, phases, row = null) {
@@ -1017,6 +1132,9 @@ function openMilestone(milestone, milestones, scheduleRows, sections) {
 }
 
 async function renderSchedule() {
+    const view = beginViewRender("schedule");
+    if (!view) return;
+    try {
     if (state.scheduleView === "milestones") {
         state.settingsView = "milestones";
         return selectModule("settings");
@@ -1027,6 +1145,7 @@ async function renderSchedule() {
         api(`/schedules/${state.project.id}/contract-sections`),
         api(`/schedules/${state.project.id}/milestones`),
     ]);
+    if (!viewRenderIsCurrent(view)) return;
     const phaseNumbers = sections
         .map((section) => Number(section.section_no))
         .filter((value) => Number.isInteger(value))
@@ -1055,6 +1174,7 @@ async function renderSchedule() {
     } catch (error) {
         timeline = { project_start: settings.project_start, rows: [], milestones: storedMilestones, error: error.message };
     }
+    if (!viewRenderIsCurrent(view)) return;
     state.scheduleSettings = settings;
     state.scheduleTimeline = timeline;
     const orderedRows = sortScheduleRows(
@@ -1081,7 +1201,7 @@ async function renderSchedule() {
     const scheduleKeyRowCount = orderedRows.filter((row) => row.schedule_key_id !== null && row.schedule_key_id !== undefined).length;
     const planningMilestoneCount = orderedRows.length - scheduleKeyRowCount;
     $("#content").innerHTML = `
-        <div class="section-heading"><div><h2>Ütemterv</h2><p>Tervezési és pénzügyi mérföldkövek, Gantt</p></div><span>${scheduleKeyRowCount} tervezési mérföldkőhöz rendelt elem · ${planningMilestoneCount} besorolatlan elem · ${milestones.length} pénzügyi mérföldkő</span></div>
+        <div class="section-heading"><div><h2 class="sr-only">Ütemterv</h2><p>Tervezési és pénzügyi mérföldkövek, Gantt</p></div><span>${scheduleKeyRowCount} tervezési mérföldkőhöz rendelt elem · ${planningMilestoneCount} besorolatlan elem · ${milestones.length} pénzügyi mérföldkő</span></div>
         <div class="toolbar schedule-phase-filter"><label>Pénzügyi fázis<select id="schedule-financial-phase">${hasFinancialPhases ? phaseNumbers.map((phaseNo) => `<option value="${phaseNo}" ${Number(state.scheduleFinancialPhase) === phaseNo ? "selected" : ""}>${phaseNo}. pénzügyi fázis</option>`).join("") : `<option value="all" selected>Projekt szintű</option>`}${legacyRows.length ? `<option value="legacy" ${selectedLegacyRows ? "selected" : ""}>Nincs besorolva</option>` : ""}</select></label><small>Az adott pénzügyi fázis saját ütemtervi elemeit és tervezési mérföldköveit szerkeszted. Az összesített Gantt minden fázist közös idővonalon jelenít meg.</small></div>
         <div class="workspace-tabs" role="tablist">
             <button type="button" data-schedule-view="phases" class="${state.scheduleView === "phases" ? "active" : ""}">Ütemtervi elemek</button>
@@ -1106,6 +1226,9 @@ async function renderSchedule() {
             $$("[data-gantt-zoom]").forEach((item) => item.classList.toggle("active", item.dataset.ganttZoom === state.ganttZoom));
             redraw();
         }, { passive: false });
+    }
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
     }
 }
 
@@ -1140,7 +1263,7 @@ function renderScheduleEditor(rows, timeline, settings, sections = []) {
     <section class="workspace-section schedule-editor">
       <div class="section-heading">
         <div>
-          <h2>Ütemterv</h2>
+          <h2 class="sr-only">Ütemterv</h2>
           <p>${phaseCount > 1 ? "A kiválasztott pénzügyi fázis önálló ütemterve." : "Projektütemterv tervezési mérföldkövekkel, referenciákkal és számított dátumokkal."}</p>
         </div>
         <div class="toolbar schedule-editor-actions">
@@ -1456,7 +1579,11 @@ function isoWeek(value) {
 }
 
 async function renderSubcontractors() {
+    const view = beginViewRender("subcontractors");
+    if (!view) return;
+    try {
     const workspace = await api(`/subcontractors/${state.project.id}/workspace`);
+    if (!viewRenderIsCurrent(view)) return;
     const { workflows, matrix, catalog } = workspace;
     state.subcontractorCatalog = catalog;
     const signed = workflows.filter((workflow) => workflow.signature_status === "Aláírva").length;
@@ -1471,14 +1598,14 @@ async function renderSubcontractors() {
             const rowClass = workflow.signature_status === "Aláírva" ? "signed" : workflow.acceptance === "Elfogadva" ? "accepted" : "";
             const searchText = `${workflow.code || ""} ${workflow.company_name} ${workflow.discipline || ""} ${status}`.toLocaleLowerCase("hu-HU");
             const details = (workflow.offer_parts || []).map((part) => `<tr class="offer-part-row" data-search-text="${escapeHtml(`${workflow.company_name} ${part.phase_name}`.toLocaleLowerCase("hu-HU"))}"><td></td><td><span>Részajánlat</span> ${escapeHtml(part.phase_name)}</td><td></td><td>${formatMoney(parseMoneyNumber(part.amount))}${part.optional ? " · opcionális" : ""}</td><td></td><td></td></tr>`).join("");
-            return `<tr class="workflow-row ${rowClass}" data-workflow-id="${workflow.id}" data-search-text="${escapeHtml(searchText)}" title="Dupla kattintással szerkeszthető; jobb kattintással is megnyitható"><td>${escapeHtml(workflow.code || "–")}</td><td><strong>${escapeHtml(workflow.company_name)}</strong><small>${escapeHtml(workflow.status_note || "")}</small></td><td>${workflow.preliminary_estimate ? formatMoney(parseMoneyNumber(workflow.preliminary_estimate)) : "–"}</td><td><strong>${escapeHtml(workflow.no_offer ? "Nem adott ajánlatot" : workflow.offer_status || "Nincs adat")}</strong><small>${workflow.offer_price ? formatMoney(parseMoneyNumber(workflow.offer_price)) : ""}</small></td><td><span class="workflow-status ${rowClass}">${escapeHtml(status)}</span></td><td>${workflow.modified_total || workflow.contract_total ? `<strong>${formatMoney(parseMoneyNumber(workflow.modified_total || workflow.contract_total))}</strong>` : "–"}<small>${escapeHtml(workflow.signature_status || "")}</small></td></tr>${details}`;
+            return `<tr class="workflow-row ${rowClass}" data-workflow-id="${workflow.id}" data-search-text="${escapeHtml(searchText)}" title="Dupla kattintással szerkeszthető; jobb kattintással is megnyitható"><td>${escapeHtml(workflow.code || "–")}</td><td><strong>${escapeHtml(workflow.company_name)}</strong><small>${escapeHtml(workflow.status_note || "")}</small></td><td>${workflow.preliminary_estimate ? formatMoney(parseMoneyNumber(workflow.preliminary_estimate)) : "–"}</td><td><strong>${escapeHtml(workflow.no_offer ? "Nem adott ajánlatot" : workflow.offer_status || "Nincs adat")}</strong><small>${workflow.offer_price ? formatMoney(parseMoneyNumber(workflow.offer_price)) : ""}</small></td><td><span class="workflow-status ${rowClass}">${escapeHtml(status)}</span></td><td>${workflow.modified_total || workflow.contract_total ? `<strong>${formatMoney(parseMoneyNumber(workflow.modified_total || workflow.contract_total))}</strong>` : "–"}<small>${escapeHtml(workflow.signature_status || "")}</small></td><td><button type="button" class="secondary-button workflow-open" data-open-workflow="${workflow.id}">Megnyitás</button></td></tr>${details}`;
         }).join("");
         return `<tbody class="subcontractor-group" data-folder-id="${folder.id || ""}" data-folder-name="${escapeHtml(folder.name)}" ${folder.id && canEdit() ? 'draggable="true"' : ""}><tr class="subcontractor-folder-row"><td colspan="6"><div><span class="folder-grip" aria-hidden="true">⋮⋮</span><strong>${escapeHtml(folder.name)}</strong>${folder.code ? `<small>${escapeHtml(folder.code)}</small>` : ""}<span>${groupWorkflows.length} folyamat</span>${folder.id && canEdit() ? `<button type="button" class="icon-button" data-edit-folder="${folder.id}" title="Szakági mappa szerkesztése">✎</button>` : ""}</div></td></tr>${rows || '<tr class="folder-empty"><td colspan="6">Ebben a szakágban még nincs ajánlatkérés.</td></tr>'}</tbody>`;
     }).join("");
     const body = state.subcontractorView === "matrix" ? renderContractMatrixModern(matrix) : `
         <div class="toolbar subcontractor-toolbar"><div><strong>Alvállalkozói ajánlatok és szerződéses folyamatok</strong><p class="muted">Szakáganként csoportosítva. A szakági fejléc húzással átrendezhető, a folyamat dupla kattintással nyitható meg.</p></div><div class="toolbar-group"><input id="subcontractor-search" type="search" placeholder="Keresés kódra, cégre, szakágra vagy státuszra" value="${escapeHtml(state.subcontractorSearch || "")}"><button id="export-subcontractors" class="secondary-button" type="button">Excel export</button>${canEdit() ? '<button id="new-subcontractor-folder" class="secondary-button" type="button">Új szakág</button><button id="new-workflow" class="primary-button" type="button">Új ajánlatkérés</button>' : ""}</div></div>
-        <div class="subcontractor-workspace" style="--workflow-panel-width:${Number(state.workflowPanelWidth || 460)}px"><section class="panel subcontractor-offers"><div class="panel-header"><h2>Ajánlatkérések kezelése</h2><span id="subcontractor-result-count">${workflows.length} folyamat</span></div><div class="table-wrap"><table><thead><tr><th>Kód</th><th>Alvállalkozó / feladat</th><th>Előzetes kalkuláció</th><th>Ajánlat</th><th>Aktuális állapot</th><th>Szerződés</th></tr></thead>${offerRows || '<tbody><tr><td colspan="6">Nincs alvállalkozói folyamat.</td></tr></tbody>'}</table></div></section><div id="workflow-panel-resizer" class="workflow-panel-resizer" role="separator" aria-label="Folyamatpanel szélességének módosítása" aria-orientation="vertical" title="Húzd balra vagy jobbra a panel átméretezéséhez"></div><aside id="subcontractor-workflow-panel" class="workflow-side-panel"><div class="workflow-panel-empty"><strong>Válassz egy folyamatot</strong><p>Dupla kattintással megnyílik a jobb oldali folyamatpanel.</p></div></aside></div>`;
-    $("#content").innerHTML = `<div class="section-heading"><div><h2>Alvállalkozók</h2><p>ajánlatok, szerződések és kifizetési mátrix</p></div><span>${signed} aláírt szerződés</span></div><div class="workspace-tabs"><button data-subcontractor-view="offers" class="${state.subcontractorView === "offers" ? "active" : ""}" type="button">Ajánlatkérések kezelése</button><button data-subcontractor-view="matrix" class="${state.subcontractorView === "matrix" ? "active" : ""}" type="button">Kifizetési mátrix</button></div><div class="schedule-workspace">${body}</div>`;
+        <div class="subcontractor-workspace" style="--workflow-panel-width:${Number(state.workflowPanelWidth || 460)}px"><section class="panel subcontractor-offers"><div class="panel-header"><h2>Ajánlatkérések kezelése</h2><span id="subcontractor-result-count">${workflows.length} folyamat</span></div><div class="table-wrap"><table><thead><tr><th>Kód</th><th>Alvállalkozó / feladat</th><th>Előzetes kalkuláció</th><th>Ajánlat</th><th>Aktuális állapot</th><th>Szerződés</th><th><span class="sr-only">Művelet</span></th></tr></thead>${offerRows || '<tbody><tr><td colspan="6">Nincs alvállalkozói folyamat.</td></tr></tbody>'}</table></div></section><div id="workflow-panel-resizer" class="workflow-panel-resizer" role="separator" aria-label="Folyamatpanel szélességének módosítása" aria-orientation="vertical" title="Húzd balra vagy jobbra a panel átméretezéséhez"></div><aside id="subcontractor-workflow-panel" class="workflow-side-panel"><div class="workflow-panel-empty"><strong>Válassz egy folyamatot</strong><p>A Megnyitás gombbal megjelenik a folyamat részletezése.</p></div></aside></div>`;
+    $("#content").innerHTML = `<div class="section-heading"><div><h2 class="sr-only">Alvállalkozók</h2><p>ajánlatok, szerződések és kifizetési mátrix</p></div><span>${signed} aláírt szerződés</span></div><div class="workspace-tabs"><button data-subcontractor-view="offers" class="${state.subcontractorView === "offers" ? "active" : ""}" type="button">Ajánlatkérések kezelése</button><button data-subcontractor-view="matrix" class="${state.subcontractorView === "matrix" ? "active" : ""}" type="button">Kifizetési mátrix</button></div><div class="schedule-workspace">${body}</div>`;
     $$("[data-subcontractor-view]").forEach((button) => button.addEventListener("click", () => { state.subcontractorView = button.dataset.subcontractorView; renderSubcontractors(); }));
     $("#new-workflow")?.addEventListener("click", () => openWorkflow(null, catalog));
     $("#new-subcontractor-folder")?.addEventListener("click", () => openSubcontractorFolder(null, catalog.folders || [], catalog.categories || []));
@@ -1504,6 +1631,11 @@ async function renderSubcontractors() {
         element.addEventListener("contextmenu", (event) => { event.preventDefault(); openWorkflowContextMenu(event, workflow, catalog); });
     });
     $$("[data-edit-folder]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); openSubcontractorFolder((catalog.folders || []).find((folder) => folder.id === Number(button.dataset.editFolder)), catalog.folders || [], catalog.categories || []); }));
+    $$('[data-open-workflow]').forEach((button) => button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const workflow = workflows.find((item) => item.id === Number(button.dataset.openWorkflow));
+        openWorkflowPanel(workflow, catalog);
+    }));
     wireSubcontractorFolderDrag();
     wireWorkflowPanelResize();
     $$("[data-matrix-cell]").forEach((element) => element.addEventListener("dblclick", () => openMatrixCell({ id: Number(element.dataset.matrixCellId) || null, project_id: state.project.id, stage_id: Number(element.dataset.stageId) || null, reference_id: element.dataset.referenceId, column_code: element.dataset.columnCode, percent: element.dataset.percent || null, amount: Number(element.dataset.amount || 0), base_amount: Number(element.dataset.baseAmount || 0), text_value: element.dataset.textValue || "", cell_type: element.dataset.cellType || "money", locked: element.dataset.locked === "true" })));
@@ -1512,6 +1644,9 @@ async function renderSubcontractors() {
     $$("[data-matrix-stage-id]").forEach((element) => element.addEventListener("dblclick", () => openMatrixStage(matrix.stages.find((stage) => stage.id === Number(element.dataset.matrixStageId)), matrix.stages)));
     $$("[data-toggle-matrix-notes]").forEach((button) => button.addEventListener("click", () => { const workflowId = button.dataset.toggleMatrixNotes; $$(`[data-matrix-note-workflow="${workflowId}"]`).forEach((row) => row.hidden = !row.hidden); button.classList.toggle("active"); }));
     $(".matrix-table-wrap")?.addEventListener("wheel", (event) => { if (!event.ctrlKey) return; event.preventDefault(); state.matrixZoom = Math.max(.75, Math.min(1.45, Number(state.matrixZoom || 1) + (event.deltaY < 0 ? .1 : -.1))); renderSubcontractors(); }, { passive: false });
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
+    }
 }
 
 function wireWorkflowPanelResize() {
@@ -1719,6 +1854,7 @@ function offerRequestPanelContent(workflow, document, defaults, documentError) {
 
 async function openWorkflowPanel(workflow, catalog = state.subcontractorCatalog || { folders: [], subcontractors: [], categories: [] }) {
     if (!workflow?.id) return;
+    const navigation = state.navigationVersion;
     const performanceScope = beginPerformanceScope("dokumentumpanel");
     const panel = $("#subcontractor-workflow-panel");
     if (!panel) {
@@ -1734,6 +1870,7 @@ async function openWorkflowPanel(workflow, catalog = state.subcontractorCatalog 
         endPerformanceScope(performanceScope);
         throw error;
     }
+    if (navigation !== state.navigationVersion || !panel.isConnected || state.workflowPanelWorkflowId !== Number(workflow.id)) { endPerformanceScope(performanceScope); return; }
     if (workflowChanged) {
         state.workflowPanelStep = Number(current.current_step || 1);
         state.workflowPanelDocumentOpen = false;
@@ -1763,8 +1900,10 @@ async function openWorkflowPanel(workflow, catalog = state.subcontractorCatalog 
             : offerRequestLauncherContent(current, latestDocument, documentError)
         : `<div class="workflow-panel-step-content"><h3>${escapeHtml(workflowPanelSteps[activeStep - 1])}</h3>${workflowPanelSummary(current, activeStep)}<p>Ennek a lépésnek a részletes adatai a teljes folyamatűrlapon érhetők el. Az ottani mentési és lépészárási szabályok változatlanul érvényesek.</p><button id="open-full-workflow" class="secondary-button" type="button">Teljes folyamat szerkesztése</button></div>`;
     const currentStep = Math.max(1, Math.min(7, Number(current.current_step || 1)));
+    if (navigation !== state.navigationVersion || !panel.isConnected || state.workflowPanelWorkflowId !== Number(workflow.id)) return;
+    $(".subcontractor-workspace")?.classList.add("has-selection");
     panel.innerHTML = `<header class="workflow-panel-header"><div><span>${escapeHtml(current.code || "Alvállalkozói folyamat")}</span><h2>${escapeHtml(current.company_name || "Nincs megadva")}</h2><p>${escapeHtml(current.discipline || "Besorolatlan szakág")}</p></div><button id="close-workflow-panel" class="icon-button" type="button" title="Folyamatpanel bezárása">×</button></header><nav class="workflow-side-steps" aria-label="Folyamat lépései">${workflowPanelSteps.map((label, index) => { const step = index + 1; const stateClass = step < currentStep ? "complete" : step === currentStep ? "active" : "locked"; return `<button data-workflow-panel-step="${step}" class="${stateClass} ${step === activeStep ? "selected" : ""}" type="button"><b>${step}</b><span>${escapeHtml(label)}</span></button>`; }).join("")}</nav><div class="workflow-panel-content">${content}</div>`;
-    $("#close-workflow-panel", panel)?.addEventListener("click", () => { state.workflowPanelWorkflowId = null; state.workflowPanelDocumentOpen = false; panel.innerHTML = '<div class="workflow-panel-empty"><strong>Válassz egy folyamatot</strong><p>Dupla kattintással megnyílik a jobb oldali folyamatpanel.</p></div>'; });
+    $("#close-workflow-panel", panel)?.addEventListener("click", () => { state.workflowPanelWorkflowId = null; state.workflowPanelDocumentOpen = false; $(".subcontractor-workspace")?.classList.remove("has-selection"); panel.innerHTML = '<div class="workflow-panel-empty"><strong>Válassz egy folyamatot</strong><p>A Megnyitás gombbal megjelenik a folyamat részletezése.</p></div>'; });
     $$('[data-workflow-panel-step]', panel).forEach((button) => button.addEventListener("click", () => { state.workflowPanelStep = Number(button.dataset.workflowPanelStep); state.workflowPanelDocumentOpen = false; openWorkflowPanel(current, catalog); }));
     $("#open-full-workflow", panel)?.addEventListener("click", () => openWorkflow(current, catalog));
     $("#open-offer-request-editor", panel)?.addEventListener("click", () => { state.workflowPanelDocumentOpen = true; openWorkflowPanel(current, catalog); });
@@ -2462,7 +2601,11 @@ function drawFinanceDisciplineBars(canvas, labels, series) {
 }
 
 async function renderFinance() {
+    const view = beginViewRender("finance");
+    if (!view) return;
+    try {
     const [summary, payments] = await Promise.all([api(`/finance/${state.project.id}/summary`), api(`/finance/${state.project.id}/payments`)]);
+    if (!viewRenderIsCurrent(view)) return;
     const utilization = Math.max(0, Math.min(100, Number(summary.utilization_percent || 0)));
     const disciplines = Object.entries(summary.by_discipline || {}).map(([name, values]) => ({ name, current: Number(values.current || 0), estimated: Number(values.estimated || 0) })).sort((a, b) => b.estimated - a.estimated);
     const derivedItems = summary.finance_items || [];
@@ -2536,6 +2679,9 @@ async function renderFinance() {
         $("#new-payment")?.addEventListener("click", () => openPayment());
         $("#payment-search").addEventListener("input", renderPaymentRows); $("#payment-status-filter").addEventListener("change", renderPaymentRows); $("#payment-type-filter").addEventListener("change", renderPaymentRows); renderPaymentRows();
     }
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
+    }
 }
 
 function openPayment(payment = null, expectedItem = null) {
@@ -2582,13 +2728,23 @@ function openPayment(payment = null, expectedItem = null) {
 }
 
 async function ensureEngagementData() {
+    const navigation = state.navigationVersion, projectId = state.project?.id;
+    if (!projectId) return;
     if (!state.master) state.master = await api("/engagements/master-data");
-    state.engagementDisciplines = await api(`/engagements/disciplines/${state.project.id}`);
+    if (navigation !== state.navigationVersion || state.project?.id !== projectId) return;
+    const disciplines = await api(`/engagements/disciplines/${projectId}`);
+    if (navigation !== state.navigationVersion || state.project?.id !== projectId) return;
+    state.engagementDisciplines = disciplines;
 }
 
 async function renderEngagements() {
+    const view = beginViewRender("engagements");
+    if (!view) return;
+    try {
     await ensureEngagementData();
+    if (!viewRenderIsCurrent(view)) return;
     const dashboard = await api(`/engagements/dashboard/${state.project.id}`);
+    if (!viewRenderIsCurrent(view)) return;
     $("#content").innerHTML = `<div class="kpi-grid"><div class="kpi"><span>Összes ügy</span><strong>${dashboard.total || 0}</strong></div><div class="kpi green"><span>Lezárt</span><strong>${dashboard.closed || 0}</strong><small>${Number(dashboard.progress_percent || 0).toLocaleString("hu-HU")}% súlyozott készültség</small></div><div class="kpi amber"><span>Nyitott</span><strong>${dashboard.open || 0}</strong></div><div class="kpi red"><span>Figyelmet igényel</span><strong>${dashboard.attention || 0}</strong></div></div>
         <div class="toolbar"><div class="toolbar-group"><input id="eng-search" type="search" placeholder="Partner, feladat, cím vagy megjegyzés" value="${escapeHtml($("#global-search").value)}"><select id="eng-discipline-filter"><option value="">Minden szakág</option>${state.engagementDisciplines.map((d) => `<option value="${d.id}">${escapeHtml(d.name)}</option>`).join("")}</select><select id="eng-status-filter"><option value="">Minden státusz</option>${state.master.statuses.map((s) => `<option value="${escapeHtml(s.code)}">${escapeHtml(s.code)} – ${escapeHtml(s.name)}</option>`).join("")}</select><button id="eng-filter" class="secondary-button" type="button">Szűrés</button></div><div class="toolbar-group"><button id="partner-database" class="secondary-button" type="button">Partneradatbázis</button>${canEdit() ? '<button id="import-excel" class="secondary-button" type="button">Excel import</button><button id="new-assignment" class="primary-button" type="button">Új ügy</button>' : ""}<button id="export-pdf" class="secondary-button" type="button">PDF riport</button><button id="export-excel" class="secondary-button" type="button">Excel export</button></div></div>
         <section class="panel"><div class="panel-header"><h2>Engedélyezési ügyek</h2><span id="assignment-count"></span></div><div id="assignment-table">${empty("Ügyek betöltése…")}</div></section>`;
@@ -2600,11 +2756,17 @@ async function renderEngagements() {
     $("#export-excel").addEventListener("click", () => downloadFile(`/engagements/export/${state.project.id}.xlsx`, `engedelyek-${state.project.id}.xlsx`));
     $("#export-pdf").addEventListener("click", () => downloadFile(`/engagements/export/${state.project.id}.pdf`, `engedelyek-${state.project.id}.pdf`));
     await loadAssignmentTable();
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
+    }
 }
 
 async function loadAssignmentTable() {
+    const navigation = state.navigationVersion, version = ++state.assignmentRenderVersion;
+    if (state.module !== "engagements" || !state.project) return;
     const params = { project_id: state.project.id, search: $("#eng-search")?.value || $("#global-search").value, discipline_id: $("#eng-discipline-filter")?.value, status_code: $("#eng-status-filter")?.value };
     const result = await api(`/engagements/assignments${toQuery(params)}`);
+    if (navigation !== state.navigationVersion || version !== state.assignmentRenderVersion || state.module !== "engagements") return;
     $("#assignment-count").textContent = `${result.total} ügy`;
     $("#assignment-table").innerHTML = result.items.length ? `<div class="table-wrap"><table><thead><tr><th>Partner</th><th>Szakág</th><th>Feladat</th><th>Státusz</th><th>Utolsó dátum</th><th>Érvényes</th><th>Felelős</th></tr></thead><tbody>${result.items.map((a) => `<tr data-assignment-id="${a.id}"><td><strong>${escapeHtml(a.partner_name || a.temporary_partner_name || "Nincs partner")}</strong>${a.temporary_partner_name ? "<br><small>Jóváhagyásra váró partner</small>" : ""}</td><td>${escapeHtml(a.discipline_name)}</td><td>${escapeHtml(a.task_name)}</td><td>${statusBadge(a)}</td><td>${formatDate(a.last_date)}</td><td>${formatDate(a.valid_until)}</td><td>${escapeHtml(a.responsible || "–")}</td></tr>`).join("")}</tbody></table></div>` : empty("Nincs a szűrésnek megfelelő ügy.");
     $$("[data-assignment-id]").forEach((row) => row.addEventListener("dblclick", () => openAssignment(Number(row.dataset.assignmentId))));
@@ -2766,10 +2928,14 @@ function openScheduleKey(scheduleKey = null) {
 }
 
 async function renderSettings() {
+    const view = beginViewRender("settings");
+    if (!view) return;
+    try {
     const [settings, finance] = await Promise.all([
         api(`/settings/${state.project.id}`),
         api(`/finance/${state.project.id}/summary`).catch(() => null),
     ]);
+    if (!viewRenderIsCurrent(view)) return;
     const project = settings.project || state.project;
     const projectWritable = hasPermission("project_write");
     const settingsWritable = hasPermission("discipline_write");
@@ -2866,14 +3032,14 @@ async function renderSettings() {
         calendar: `<section class="panel settings-calendar"><div class="panel-header"><h2>Naptárkivételek</h2><span>Munkanap- és pihenőnap-kezelés</span></div>${calendarWritable ? '<form id="calendar-exception-form" class="inline-editor"><label>Dátum<input name="exception_date" type="date" required></label><label>Típus<select name="exception_type"><option>Munkanap</option><option>Munkaszüneti nap</option><option selected>Pihenőnap</option></select></label><label>Megnevezés<input name="name" maxlength="255"></label><button class="primary-button" type="submit">Rögzítés</button></form>' : '<p class="permission-note">A globális naptár módosításához adminisztrátori jogosultság szükséges.</p>'}<div class="table-wrap"><table><thead><tr><th>Dátum</th><th>Típus</th><th>Megnevezés</th><th></th></tr></thead><tbody>${exceptionRows}</tbody></table></div></section>`,
         quality: `<div class="settings-quality-kpis"><div><span>Aktív szakág</span><strong>${settings.disciplines.length - hiddenDisciplines}</strong></div><div><span>Szerződéses mérföldkő</span><strong>${milestones.length}</strong></div><div class="${hasCurrentRate ? "ok" : "error"}"><span>${currentYear}. évi napidíj</span><strong>${hasCurrentRate ? "Rendben" : "Hiányzik"}</strong></div><div class="${qualityIssues.length ? "warning" : "ok"}"><span>Adatminőségi tétel</span><strong>${qualityIssues.length}</strong></div></div><section class="panel"><div class="panel-header"><h2>Adatkapcsolati ellenőrzés</h2><span>${qualityErrorCount} hiba · ${qualityWarningCount} figyelmeztetés</span></div><div class="quality-list">${qualityIssues.length ? qualityIssues.map((issue) => `<div class="quality-item ${issue.severity || "warning"}"><i>${issue.severity === "error" ? "!" : "i"}</i><span><strong>${escapeHtml(issue.message)}</strong><small>${escapeHtml(issue.reference || "Projektbeállítás")}</small></span></div>`).join("") : '<div class="quality-empty"><strong>Az ellenőrzés nem talált hibát.</strong><span>A pénzügyi források és projektbeállítások összhangban vannak.</span></div>'}</div></section>`,
     };
-    $("#content").innerHTML = `<div class="section-heading"><div><h2>Adatok</h2><p>Projekt, struktúra, pénzügy és munkanaptár</p></div><span>${qualityIssues.length ? `${qualityIssues.length} ellenőrizendő tétel` : "Konfiguráció rendben"}</span></div><div class="workspace-tabs settings-tabs"><button data-settings-view="project" class="${state.settingsView === "project" ? "active" : ""}" type="button">Adatlap</button><button data-settings-view="structure" class="${state.settingsView === "structure" ? "active" : ""}" type="button">Szakágak és fázisok</button><button data-settings-view="finance" class="${state.settingsView === "finance" ? "active" : ""}" type="button">Pénzügyi paraméterek</button><button data-settings-view="calendar" class="${state.settingsView === "calendar" ? "active" : ""}" type="button">Munkanaptár</button><button data-settings-view="quality" class="${state.settingsView === "quality" ? "active" : ""}" type="button">Adatminőség <b>${qualityIssues.length}</b></button></div><div class="settings-workspace">${Object.entries(panels).map(([key, panel]) => `<div data-settings-panel="${key}" ${state.settingsView === key ? "" : "hidden"}>${panel}</div>`).join("")}</div>`;
+    $("#content").innerHTML = `<div class="section-heading"><div><h2 class="sr-only">Adatok</h2><p>Projekt, struktúra, pénzügy és munkanaptár</p></div><span>${qualityIssues.length ? `${qualityIssues.length} ellenőrizendő tétel` : "Konfiguráció rendben"}</span></div><div class="workspace-tabs settings-tabs"><button data-settings-view="project" class="${state.settingsView === "project" ? "active" : ""}" type="button">Adatlap</button><button data-settings-view="structure" class="${state.settingsView === "structure" ? "active" : ""}" type="button">Szakágak / fázisok</button><button data-settings-view="finance" class="${state.settingsView === "finance" ? "active" : ""}" type="button">Napidíjak</button><button data-settings-view="calendar" class="${state.settingsView === "calendar" ? "active" : ""}" type="button">Munkanaptár</button><button data-settings-view="quality" class="${state.settingsView === "quality" ? "active" : ""}" type="button">Adatminőség <b>${qualityIssues.length}</b></button></div><div class="settings-workspace">${Object.entries(panels).map(([key, panel]) => `<div data-settings-panel="${key}" ${state.settingsView === key ? "" : "hidden"}>${panel}</div>`).join("")}</div>`;
     const projectSettingsTab = $('[data-settings-view="project"]');
     projectSettingsTab.insertAdjacentHTML(
         "afterend",
         '<button data-settings-view="milestones" class="' + (state.settingsView === "milestones" ? "active" : "") + '" type="button">Pénzügyi mérföldkövek</button>'
         + '<button data-settings-view="schedule_keys" class="' + (state.settingsView === "schedule_keys" ? "active" : "") + '" type="button">Tervezési mérföldkövek</button>',
     );
-    $('[data-settings-view="structure"]').textContent = "Szakágak és projektfázisok";
+    $('[data-settings-view="structure"]').textContent = "Szakágak / fázisok";
     $$('[data-settings-view]').forEach((button) => button.addEventListener("click", () => { state.settingsView = button.dataset.settingsView; $$('[data-settings-view]').forEach((item) => item.classList.toggle("active", item === button)); $$('[data-settings-panel]').forEach((panel) => { panel.hidden = panel.dataset.settingsPanel !== state.settingsView; }); }));
 
     $("#settings-project-form")?.addEventListener("submit", async (event) => {
@@ -2929,14 +3095,24 @@ async function renderSettings() {
     $$('[data-discipline-visibility]').forEach((input) => input.addEventListener("change", async () => { await api(`/settings/${state.project.id}/disciplines/${input.dataset.disciplineVisibility}`, { method: "PATCH", body: { visible: input.checked } }); toast("A szakági láthatóság frissült."); }));
     $("#calendar-exception-form")?.addEventListener("submit", async (event) => { event.preventDefault(); const data = formDataObject(event.currentTarget); await api("/settings/calendar-exceptions", { method: "POST", body: data }); toast("A naptárkivétel mentése sikerült."); await renderSettings(); });
     $$('[data-delete-exception]').forEach((button) => button.addEventListener("click", async () => { if (!confirm("Biztosan törlöd ezt a naptárkivételt?")) return; await api(`/settings/calendar-exceptions/${button.dataset.deleteException}`, { method: "DELETE" }); await renderSettings(); }));
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
+    }
 }
 
 async function renderAdmin() {
+    const view = beginViewRender("admin");
+    if (!view) return;
+    try {
     const [profiles, pending, returned, clock] = await Promise.all([api("/admin/profiles"), api("/engagements/partner-requests?status=pending"), api("/engagements/partner-requests?status=changes_requested"), api("/admin/application-clock")]);
+    if (!viewRenderIsCurrent(view)) return;
     const requests = [...pending, ...returned];
     $("#content").innerHTML = `<div class="kpi-grid"><div class="kpi"><span>Felhasználó</span><strong>${profiles.length}</strong></div><div class="kpi amber"><span>Partnerkérelem</span><strong>${requests.length}</strong><small>döntésre vagy javításra vár</small></div><div class="kpi green"><span>Rendszerdátum</span><strong>${formatDate(clock.system_date)}</strong></div><div class="kpi violet"><span>Alkalmazás dátuma</span><strong>${formatDate(clock.application_date)}</strong><small>${clock.offset_days} nap eltérés</small></div></div><div class="two-columns"><section class="panel"><div class="panel-header"><h2>Jóváhagyásra váró partnerkérelmek</h2><span>Dupla kattintással megnyitható</span></div><div class="compact-list">${requests.length ? requests.map((r) => `<button type="button" data-request-id="${r.id}"><strong>${escapeHtml(r.proposed_data?.name || "Névtelen kérelem")}</strong><span>${({ create: "Új partner", update: "Módosítás", delete: "Törlés/inaktiválás" })[r.request_type] || r.request_type}</span><small>${r.status === "changes_requested" ? "Javításra visszaküldve" : formatDate(r.created_at)}</small></button>`).join("") : empty("Nincs jóváhagyásra váró partnerkérelem.")}</div></section><section class="panel"><div class="panel-header"><h2>Felhasználók</h2></div><div class="compact-list">${profiles.map((p) => `<div class="profile-row"><span><strong>${escapeHtml(p.display_name || p.email || p.id)}</strong><small>${roleLabel(p.role)}</small></span><b>${p.active ? "Aktív" : "Inaktív"}</b></div>`).join("")}</div></section></div><section class="panel"><div class="panel-header"><h2>Értesítési tesztidő</h2><span>A valós rendszerdátum nem módosul</span></div><div class="panel-body"><form id="application-clock-form" class="clock-form"><label>Napeltolás<input name="offset_days" type="number" min="-3650" max="3650" value="${clock.offset_days}"></label><label class="checkbox-label"><input name="force_first_of_month" type="checkbox" ${clock.force_first_of_month ? "checked" : ""}> Mindig a hónap első napját használja</label><button class="primary-button" type="submit">Tesztidő alkalmazása</button></form></div></section>`;
     $$("[data-request-id]").forEach((row) => row.addEventListener("dblclick", () => openApproval(requests.find((r) => r.id === Number(row.dataset.requestId)))));
     $("#application-clock-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget; const updatedClock = await api("/admin/application-clock", { method: "PUT", body: { offset_days: Number(form.elements.offset_days.value), force_first_of_month: form.elements.force_first_of_month.checked } }); state.applicationDate = updatedClock.application_date; toast("Az alkalmazás tesztideje frissült."); await renderAdmin(); await refreshNotifications(); });
+    } catch (error) {
+        if (viewRenderIsCurrent(view)) throw error;
+    }
 }
 
 function openApproval(request) {
